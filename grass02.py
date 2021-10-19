@@ -71,11 +71,11 @@ class ProcessGRASS():
             
             scriptFPN = os.path.join(scriptFP,scriptFN)
             
-            scriptF = open(scriptFPN,'w')
+            self.scriptF = open(scriptFPN,'w')
             
             writeln = '# Script created by Kartturs GeoImagine Framework for GRASS processing %s, created %s\n' %(dstComp, today)
     
-            scriptF.write(writeln)
+            self.scriptF.write(writeln)
             
         for datum in self.pp.srcPeriod.datumL:
                            
@@ -114,12 +114,25 @@ class ProcessGRASS():
                 cmdReplaceD = {'srcFPN':srcLayerFPN,
                                 'srcFN':os.path.splitext(self.pp.srcLayerD[locus][datum][srcComp].FN)[0].replace('-',''),
                                 'dstFPN':self.pp.dstLayerD[locus][datum][dstComp].FPN}
-                                   
-                for param in self.pp.process.parameters.subparameter:
+                                
+                                
+                # set mapset to region
+                qwargs = {'flags':'c','mapset':locus}
+                
+                if not self.pp.process.dryrun:
+                            
+                    if self.pp.process.parameters.asscript:
+                        
+                        self._WriteGrassCmd('g.mapset',qwargs)
                     
+                    else:
+                        
+                        grass.run_command('g.mapset', **qwargs)
+                           
+                for param in self.pp.process.parameters.subparameter:
+                                       
                     cmdD = dict ( list ( param.__dict__.items() ) )
-                                        
-
+                     
                     for cmd in cmdD:
                         
                         kwargs = dict ( list ( cmdD[cmd].__dict__.items() ) )
@@ -128,24 +141,54 @@ class ProcessGRASS():
                         
                         kwargs['overwrite'] = True
                                       
-                        
-                        
                         for key in kwargs:
                             
                             if kwargs[key] in cmdReplaceD:
                                 
                                 kwargs[key] = cmdReplaceD[kwargs[key]]
                                 
+                                
+                        if cmd in ['r.out.gdal'] and self.pp.process.parameters.mosaic: 
+                            
+                            self._SetOutRegion()
+                                
+                        if self.verbose:   
+                            
+                            print ('        ',cmd,kwargs)
+                            
+                        if not self.pp.process.dryrun:
+                            
+                            if self.pp.process.parameters.asscript:
+                                
+                                self._WriteGrassCmd(cmd,kwargs)
+                            
+                            else:
+                                           
+                                grass.run_command(cmd, **kwargs) 
+                        
+                        if cmd in ['r.out.gdal'] and self.pp.process.parameters.mosaic: 
+                            
+                            self._ReSetRegion(self.pp.process.parameters.regionlayer)
+                        
+                        '''        
                         if cmd == 'r.out.gdal' and self.pp.process.parameters.mosaic: 
                             
                             # set the regions to the original src file (i.e. the core tile)
                             qwargs = {'flags':'ec','input':self.pp.srcLayerD[locus][datum][srcComp].FPN,'output':'dummy'}
                             
-                            grass.run_command('r.in.gdal', **qwargs)
+                            grass.run_command('r.out.gdal', **qwargs)
                             
                         print ('kwargs',kwargs)
                         
                         grass.run_command(cmd, **kwargs) 
+                        '''
+        if self.pp.process.parameters.asscript:
+            
+            self.scriptF.close()
+            
+            infostr = 'To render the commands, run the script file:\n    %s' %(scriptFPN)
+            
+            print (infostr)
                         
     def _GrassOnetoManyTiles(self):
         '''
@@ -159,7 +202,7 @@ class ProcessGRASS():
             
             today = mj_dt.Today()
             
-            scriptFP = os.path.join('/Volumes',self.pp.dstPath.volume, self.pp.procsys.dstsystem, self.pp.dstCompD[self.pp.dstCompL[0]].source,'region','reprojectscript')
+            scriptFP = os.path.join('/Volumes',self.pp.dstPath.volume, self.pp.procsys.dstsystem, self.pp.dstCompD[self.pp.dstCompL[0]].source,'region','grasscript')
             
             if not os.path.exists(scriptFP):
                 
@@ -203,7 +246,6 @@ class ProcessGRASS():
                         
                         skipLayerCmdL.append(dstComp.replace('out',''))
                         
-                        
                         if self.verbose:
                             
                             infostr = '        Output layer already exists:\n        %s ' %(dstLayer.FPN)
@@ -224,7 +266,7 @@ class ProcessGRASS():
                     
                     if self.verbose:
                             
-                        infostr = '        SKIPPING - all outpus layers exists: %s' %(locus)
+                        infostr = '        SKIPPING - all output layers exists: %s' %(locus)
                             
                         print (infostr)
                     
@@ -250,6 +292,19 @@ class ProcessGRASS():
                 for cl in dstLayerD:
                                          
                     cmdReplaceD[cl] = dstLayerD[cl].FPN
+                                        
+                # set mapset to region
+                qwargs = {'flags':'c','mapset':locus}
+                
+                if not self.pp.process.dryrun:
+                            
+                    if self.pp.process.parameters.asscript:
+                        
+                        self._WriteGrassCmd('g.mapset',qwargs)
+                    
+                    else:
+                        
+                        grass.run_command('g.mapset', **qwargs)
                     
                 if self.pp.process.parameters.mosaic:
                     
@@ -269,7 +324,9 @@ class ProcessGRASS():
                         else:
                     
                             grass.run_command('r.in.gdal', **kwargs)
-                                            
+                                
+                srcLayer = False 
+                           
                 for param in self.pp.process.parameters.subparameter:
                     
                     cmdD = dict ( list ( param.__dict__.items() ) )
@@ -293,7 +350,9 @@ class ProcessGRASS():
 
                         # Always set overwrite to True
                         
-                        kwargs['overwrite'] = True
+                        if not cmd == 'null':
+                        
+                            kwargs['overwrite'] = True
                                                               
                         for key in kwargs:
                             
@@ -301,25 +360,22 @@ class ProcessGRASS():
                                 
                                 kwargs[key] = cmdReplaceD[kwargs[key]]
                                 
-                        if cmd == 'r.out.gdal' and self.pp.process.parameters.mosaic: 
-                            
-                            # set the regions to the original src file (i.e. the core tile)
-                            qwargs = {'flags':'s','raster':'originalTile'}
-                            
-                            if self.verbose:   
-                            
-                                    print ('        ','g.region',qwargs)
-                            
-                            if not self.pp.process.dryrun:
-                                
-                                if self.pp.process.parameters.asscript:
+                                if cmd in ["v.out.ogr","v.in.ogr"]:
                                     
-                                    self._WriteGrassCmd('g.region',qwargs)
-                                
-                                else:
+                                    ext = os.path.splitext( kwargs['output'] )[1]
                                     
-                                    grass.run_command('g.region', **qwargs)
+                                    print (kwargs['output']  )
+                                    
+                                    kwargs["output"] = kwargs["output"].replace(ext,'.shp')
+                                           
+                        if cmd == 'r.in.gdal'  and not srcLayer:
                             
+                            srcLayer = kwargs['output']
+                                
+                        if cmd in ['r.out.gdal'] and self.pp.process.parameters.mosaic: 
+                            
+                            self._SetOutRegion()
+                                
                         if self.verbose:   
                             
                             print ('        ',cmd,kwargs)
@@ -334,25 +390,11 @@ class ProcessGRASS():
                                            
                                 grass.run_command(cmd, **kwargs) 
                         
-                        if cmd == 'r.out.gdal' and self.pp.process.parameters.mosaic: 
+                        if cmd in ['r.out.gdal'] and self.pp.process.parameters.mosaic: 
                             
-                            # reset the regions to the virtual, enlarged, region)
-                            qwargs = {'flags':'s','raster':cmdReplaceD['srcFN']}
-                            
-                            if self.verbose:   
-                            
-                                print ('        ','g.region',qwargs)
-                            
-                            if not self.pp.process.dryrun:
-                                
-                                if self.pp.process.parameters.asscript:
-                                
-                                    self._WriteGrassCmd('g.region',qwargs)
-                                
-                                else:
-                                
-                                    grass.run_command('g.region', **qwargs)
-                            
+                            self._ReSetRegion(self.pp.process.parameters.regionlayer)
+
+                '''            
                 if self.pp.process.parameters.mosaic:
                     
                     # Remove the original tile
@@ -371,16 +413,63 @@ class ProcessGRASS():
                         else:
                     
                             grass.run_command('g.remove', **kwargs)
+                '''
                                               
         if self.pp.process.parameters.asscript:
             
             self.scriptF.close()
             
-            infostr = 'To render the comamnds, run the script file:\n    %s' %(scriptFPN)
+            infostr = 'To render the commands, run the script file:\n    %s' %(scriptFPN)
             
             print (infostr)
+            
+            
+    def _SetOutRegion(self):
+        '''
+        '''
+        # set the regions to the original src file (i.e. the core tile)
+        qwargs = {'raster':'originalTile'}
+        
+        if self.verbose:   
+        
+                print ('        ','g.region',qwargs)
+        
+        if not self.pp.process.dryrun:
+            
+            if self.pp.process.parameters.asscript:
+                
+                self._WriteGrassCmd('g.region',qwargs)
+            
+            else:
+                
+                grass.run_command('g.region', **qwargs)
+                
+    def _ReSetRegion(self,regionlayer):
+        '''
+        '''
+                            
+        # reset the regions to the virtual, enlarged, region)
+        qwargs = {'raster':regionlayer}
+        
+        if self.verbose:   
+        
+            print ('        ','g.region',qwargs)
+        
+        if not self.pp.process.dryrun:
+            
+            if self.pp.process.parameters.asscript:
+            
+                self._WriteGrassCmd('g.region',qwargs)
+            
+            else:
+            
+                grass.run_command('g.region', **qwargs)
                         
     def _WriteGrassCmd(self,cmd,kwargs):
+        
+        if cmd == 'null':
+            
+            cmd = ''
                 
         for key, value in kwargs.items():
                         
@@ -391,6 +480,10 @@ class ProcessGRASS():
             elif isinstance(value, bool) and value: 
             
                 cmd += ' --%s' %(key)
+                
+            elif key == 'null':
+                
+                cmd += '%s' %(value)
                 
             else:
                 
